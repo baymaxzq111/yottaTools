@@ -1,307 +1,503 @@
-# -*- coding: utf-8 -*-
+# coding=utf-8
 # Python bytecode 2.7
-#zaomujin
-from pyfbsdk import *
-from pyfbsdk_additions import *
+
 import sys
+import maya.cmds as cmds
+import maya.mel as mel
 import os
-import json
-import threading
+import ctypes.wintypes
+import maya.standalone as std
 import shutil
 
-print("这是一个jiaoben")
-print(sys.argv)
+std.initialize(name='python')
+# pyrcc5 -o qrc_resources.py resources.qrc
+mayapath = sys.argv[1]
 
-class MotionBuilder():
+class ExportFBX_C():
     def __init__(self):
-        self.bones = [
-                    u"Shoulder_R",
-                    u"Elbow_R",
-                    u'Wrist_R',
-                    u'PinkyFinger1_R',
-                    u'PinkyFinger2_R',
-                    u'PinkyFinger3_R',
-                    u'PinkyFinger4_R',
-                    u'RingFinger1_R',
-                    u'RingFinger2_R',
-                    u'RingFinger3_R',
-                    u'RingFinger4_R',
-                    u'IndexFinger4_R',
-                    u'IndexFinger3_R',
-                    u'IndexFinger2_R',
-                    u'IndexFinger1_R',
-                    u'MiddleFinger4_R',
-                    u'MiddleFinger3_R',
-                    u'MiddleFinger2_R',
-                    u'MiddleFinger1_R',
-                    u'Hip_R',
-                    u'Knee_R',
-                    u'Ankle_R',
-                ]
-        self.readFbx = {}
-        if not os.path.exists("c:/motionbuilderoutFBX.json"):
-            return
+        mayaOutpath,mayafieldername = os.path.split(mayapath)
+        self.selecttion = []
+        if sys.argv[3]  == "Ani":
+            self.mayaOutpath = mayaOutpath+"/"+mayafieldername.split(".")[0]+"/"
+            if not os.path.exists(self.mayaOutpath):
+                os.makedirs(self.mayaOutpath)
+            self.OpenAndExportPath(mayapath)
+        elif sys.argv[3]  == "Rig":
+            self.mayaOutpath = mayaOutpath+"/"
+            self.outFbxname = mayafieldername.split(".")[0]+".fbx"
+            self.ExportFBX_Rig(self.mayaOutpath+self.outFbxname)
+    def ExportFBX_Rig(self,fbxpath):
+        self.skinbone = []
+        self.OpneMayaCmd(mayapath)
+        self.listBlendShape()
+        self.disConnectlistAllbone()
+        cmds.select(self.selecttion)
+        self.ouputFBx(fbxpath)
+    def disConnectlistAllbone(self):
+        allboen = cmds.ls(type = "joint",long=True)
+        for i in allboen:
+            self.disconnect_all_connections(i)
+        for i in self.skinbone:
+            mod = self.findSkinnedMeshesFromJoint(i)
+            for mm in mod:
+                if mm not in self.selecttion:
+                    self.selecttion.append(mm)
+            self.selecttion.append(i)
+    def clearAllconstanc(self):
+        typelist = ["parentConstraint","pointConstraint","orientConstraint","scaleConstraint" ,"aimConstraint"]
+        for i in typelist:
+            cmds.delete(cmds.ls(type = i))
+    def disconnect_all_connections(self,joint):
+        self.clearAllconstanc()
+        connections = cmds.listConnections(joint, s=1,d=1,p=1)
+        con = [".tx",".ty",".tz",".rx",".ry",".rz",".sx",".sy",".sz",".v",".t",".r",".s"]
+        if connections:
+            for conn in connections:
+                obj = conn.split(".")[0]
+                if cmds.nodeType(obj) == "skinCluster":
+                    self.skinbone.append(joint)
+                for i in con:
+                    listx = cmds.listConnections(joint+i, s=1,d=1,p=1)
+                    if listx:
+                        for kk in listx:
+                            try:
+                                cmds.disconnectAttr(kk, joint+i)
+                            except:
+                                pass
+    def OpneMayaCmd(self,path):
+        if ".ma" in path:
+            cmds.file(  path,
+                        f = True,
+                        options = "v=0;",
+                        ignoreVersion = True,
+                        typ = "mayaAscii",
+                        o = True
+                    )
+        elif ".mb" in path:
+            cmds.file(  path,
+                        f = True,
+                        options = "v=0;",
+                        ignoreVersion = True,
+                        typ = "mayaBinary",
+                        o = True
+                    )
+    def OpenAndExportPath(self,path):
+        if ".ma" in path:
+            cmds.file(  path,
+                        f = True,
+                        options = "v=0;",
+                        ignoreVersion = True,
+                        typ = "mayaAscii",
+                        o = True
+                    )
+        elif ".mb" in path:
+            cmds.file(  path,
+                        f = True,
+                        options = "v=0;",
+                        ignoreVersion = True,
+                        typ = "mayaBinary",
+                        o = True
+                    )
+        if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+        self.setcurrentUnit(int(sys.argv[2]))
+        self.setAllctrlZero()
+        #cmds.file(force=True, save=True, options="v=0", type="mayaAscii")
+        self.listCam()
+        self.listAllbone()
+        self.bakeAni(self.selecttion)
+        self.listAllRigBone()
+        self.Fbx = {}
+        if self.skonbone:
+            for i in self.skonbone:
+                skelect = self.listAllJoints(i)
+                Charmesh = []
+                for bone in skelect:
+                    objk = self.findSkinnedMeshesFromJoint(bone)
+                    for k in objk:
+                        if k not in Charmesh:
+                            Charmesh.append(k)
+                if Charmesh:
+                    charname = i.split(":")[0]
+                    charOutput = self.mayaOutpath+charname+".fbx"
+                    self.Fbx[charname] = [charOutput,skelect,Charmesh]
+                    referenceNode = self.getReferenceNodeFromSelection(i)
+                    if referenceNode:
+                        self.importReferenceByNode(referenceNode)
+                    cmds.select(skelect)
+                    cmds.select(Charmesh,add = 1)
+                    self.ouputFBx(charOutput)
+                    charnameallobj = cmds.ls(charname+":*")
+                    if charnameallobj:
+                        for i in charnameallobj:
+                            try:
+                                cmds.delete(i)
+                            except:
+                                pass
+            for cam in self.Camerm:
+                charOutput = self.mayaOutpath+cam.replace(":","_")+"_outPutCam.fbx"
+                cmds.select(cam)
+                self.ouputFBx(charOutput)
+            #others
+            othersJoint = cmds.ls(type = "joint")
+            if othersJoint:
+                othersmesh = []
+                for i in othersJoint:
+                    objk = self.findSkinnedMeshesFromJoint(i)
+                    for k in objk:
+                        if k not in othersmesh:
+                            othersmesh.append(k)
+                if othersmesh:
+                    cmds.select(othersJoint)
+                    cmds.select(othersmesh,add = 1)
+                    charOutput = self.mayaOutpath+"other.fbx"
+                    self.ouputFBx(charOutput)
+                    for i in othersJoint:
+                        try:
+                            cmds.delete(i)
+                        except:
+                            pass
+                    for i in othersmesh:
+                        try:
+                            cmds.delete(i)
+                        except:
+                            pass
+            #cmds.file(force=True, save=True, options="v=0", type="mayaAscii")
+            #outputTxt = self.mayaOutpath+"output.txt"
+            #sys.stdout = open(outputTxt, "w")
+            #print (sys.stdout)
+            for key,vou in self.Fbx.items():
+                self.OpneFBx(vou[0])
+                cmds.select(cl = 1)
+                for i in vou[1]:
+                    if cmds.objExists(i):
+                        cmds.select(i,add = 1)
+                for i in vou[2]:
+                    if cmds.objExists(i):
+                        cmds.select(i,add = 1)
+                self.ouputFBx(vou[0])
+                self.OpneFBx(vou[0])
+                self.removeAllNamespaces()
+                container = cmds.ls(type = "container")
+                if container:
+                    cmds.delete(container)
+                if cmds.objExists("Root_M") or cmds.objExists("hips") :
+                    cmds.polyCube(n = "Box")
+                    if cmds.objExists("Root_M"):
+                        cmds.parentConstraint( 'Root_M', 'Box', mo = 0 )
+                    elif cmds.objExists("hips"):
+                        cmds.parentConstraint( 'hips', 'Box', mo = 0 )
+                    self.bakeAni("Box")
+                    cmds.select("Box")
+                self.ouputFBxAll(vou[0])
+    def OpneFBx(self,fbxpath):
+        #cmds.file(new=True, force=True)
+        if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+        cmds.file(  fbxpath,
+                    f = True,
+                    typ = "FBX",
+                    ignoreVersion = True,
+                    options = "fbx",
+                    o = True
+                )
+        if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+    def removeAllNamespaces(self):
+        namespaces = [ ns for ns in cmds.namespaceInfo( lon=1, r=1 ) if ns not in [ 'UI', 'shared' ] ]
+        # Reverse Iterate through the contents of the list to remove the deepest layers first
+        for ns in reversed(namespaces):
+            cmds.namespace( rm=ns, mnr=1 )
+        namespaces[:] = []
+    def ouputFBxAll(self,ath):
+        if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+        cmds.file(ath,force = True,options = "v=0;",type = "FBX export",pr = True,ea = True)
+    def ouputFBx(self,pathFBx):
+        if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+        cmds.file(pathFBx, force=True, options="v=0;", typ="FBX export", pr=True, es=True)
+    def importReferenceByNode(self,referenceNode):
+        if cmds.nodeType(referenceNode) == "reference":
+            refFile = cmds.referenceQuery(referenceNode, filename=True)
+            cmds.file(refFile, importReference=True)
+    def getReferenceNodeFromSelection(self,selectio):
+        cmds.select(selectio)
+        selection = cmds.ls(sl = True)
+        if len(selection) == 1:
+            selectedObject = selection[0]
+            if cmds.referenceQuery(selectedObject, isNodeReferenced=True):
+                refNode = cmds.referenceQuery(selectedObject, referenceNode=True)
+                return refNode
+        return None
+    def listAllRigBone(self):
+        self.skonbone = cmds.ls("*:DeformationSystem")
+    def findSkinnedMeshesFromJoint(self,jointName):
+        skinnedMeshes = []
+        skinClusters = cmds.listConnections(jointName, type='skinCluster')
+        if skinClusters:
+            for cluster in skinClusters:
+                geometries = cmds.skinCluster(cluster, query=True, geometry=True)
+                if geometries:
+                    geometriesparent = self.getTransformFromShape(geometries)
+                    if geometriesparent:
+                        skinnedMeshes.append(geometriesparent)
+        return skinnedMeshes
+    def getTransformFromShape(self,shapeName):
+        parents = cmds.listRelatives(shapeName, parent=True)
+        if parents:
+            return parents[0]
         else:
-            self.readFbx = self.readjson("c:/motionbuilderoutFBX.json")
-        self.setBonesTposeS()
-    def setBonesTposeS(self):
-        Threadtext = self.readFbx["threading"]
-        if Threadtext == u'单线程':
-            number = 1
-        elif Threadtext == u'双线程':
-            number = 2
-        elif Threadtext == u'三线程':
-            number = 3
-        elif Threadtext == u'四线程':
-            number = 4
-        elif Threadtext == u'五线程':
-            number = 5
-        elif Threadtext == u'十线程':
-            number = 10
+            return None
+    def listAllbone(self):
+        allboen = cmds.ls(type = "joint",long=True)
+        for i in allboen:
+            if i not in self.selecttion:
+                self.selecttion.append(i)
+    def listAllJoints(self,startJoint=None):
+        if not startJoint:
+            allJoints = cmds.ls(type='joint', long=True)
         else:
-            number = len(self.readFbx.keys())
-        if Threadtext == u'单线程':
-            self.setBonesTposeOne()
-        elif Threadtext == u'全部线程':
-            for i in range(number): #motionbuilderoutFBX
-                #print(self.readFbx["motionbuilderoutFBX"][i])
-                t = threading.Thread(target = self.onetsetBones,args=(self.readFbx["motionbuilderoutFBX"][i],))
-                t.start()
+            allJoints = cmds.listRelatives(startJoint, allDescendents=True, fullPath=True) or []
+        return allJoints
+    def listBlendShape(self):
+        for i in cmds.ls(type = "blendshape"):
+            if i not in self.selecttion:
+                self.selecttion.append(i)
+    def listCam(self):
+        listCam = cmds.ls(type = "camera")
+        self.Camerm = []
+        defoutCam = [
+                         u'backShape',
+                         u'leftShape',
+                         u'frontShape',
+                         u'perspShape',
+                         u'sideShape',
+                         u'topShape'
+                        ]
+        if listCam:
+            for i in listCam:
+                if i.split(":")[-1] not in defoutCam and i not in self.Camerm:
+                    camparent = cmds.listRelatives(i, parent=True)
+                    self.Camerm.append(camparent[0])
+                    self.selecttion.append(camparent[0])
+    def bakeAni(self,selecttion):
+        cmds.select(selecttion)
+        #self.getMaxAndMinframe(selecttion[0])
+        minTime = cmds.playbackOptions(query=True, minTime=True)
+        maxTime = cmds.playbackOptions(query=True, maxTime=True)
+        cmds.bakeResults(selecttion,
+                        simulation = True,
+                        t = (minTime,maxTime),
+                        sampleBy = 1,
+                        oversamplingRate = 1,
+                        disableImplicitControl = True,
+                        preserveOutsideKeys = True,
+                        sparseAnimCurveBake = False ,
+                        removeBakedAttributeFromLayer = False ,
+                        removeBakedAnimFromLayer = False ,
+                        bakeOnOverrideLayer = False ,
+                        minimizeRotation = True ,
+                        controlPoints = False ,
+                        shape = True,)
+    def getMaxAndMinframe(self,selection_list):
+        min_frame = None
+        max_frame = None
+        keyframes = cmds.keyframe(selection_list, query=True)
+        if keyframes:
+            obj_min_frame = min(keyframes)
+            obj_max_frame = max(keyframes)
+            if min_frame is None or obj_min_frame < min_frame:
+                min_frame = obj_min_frame
+            if max_frame is None or obj_max_frame > max_frame:
+                max_frame = obj_max_frame
+            self.min_frame = min_frame
+            self.max_frame = max_frame
         else:
-            num = len(self.readFbx.keys())/number
-            kf = self.split_list(self.readFbx.values(),int(num))
-            if len(kf) == number:
-                for i in range(number):
-                    t = threading.Thread(target = self.onetsetBones,args=(self.readFbx.values()[i],))
-                    t.start()
-            elif len(kf) == number + 1:
-                for i in range(number+1):
-                    t = threading.Thread(target = self.onetsetBones,args=(self.readFbx.values()[i],))
-                    t.start()
-    def split_list(self,lst,num):
-        return [lst[i:i+num] for i in range(0, len(lst), num)]
-    def setBonesTposeOne(self):
-        for i,v in self.readFbx.items():
-            for k in v:
-                self.onetsetBones(k)
-    def clear_scene(self):
-        system = FBSystem()
-        # 清除场景中的所有内容。
-        system.Scene.Clear()
-    def onetsetBones(self,k):
-        ath,feo = os.path.split(k)
-        charname = feo.split(".")[0]
-        self.setBonesTpose(k)
-        self.CharacterizeHiRes(str(charname),"adv")
-        self.SaveFBX(k)
-        lajipath = ath+"/"+feo.split(".")[0]+".bck"
-        #print(lajipath)
-        if os.path.exists(lajipath):
-            try:
-                shutil.rmtree(lajipath)
-            except:
-                pass
-    def SaveFBX(self,file_path):
-        save_result = self.lApp.FileSave(str(file_path))
-        self.lApp.FileExit(False)
-    def OpenFBX(self,file_path):
-        #print(file_path)
-        self.lApp = FBApplication()
-        result = self.lApp.FileOpen(str(file_path))
-    def setBonesTpose(self,fbxpath):
-        self.OpenFBX(fbxpath)
-        for i in self.bones:
-            ByLabelNameofbone_L = FBFindModelByLabelName(str(i))
-            ByLabelNameofbone_R = FBFindModelByLabelName(str(i.replace("_R","_L")))
-            if ByLabelNameofbone_L and ByLabelNameofbone_R:
-                if i == "Hip_R" or  i == "Knee_R" or  i == "Ankle_R":
-                    ByLabelNameofbone = FBFindModelByLabelName(str(i))
-                    ByLabelNameofbone.SetVector( FBVector3d( 90, 0, -90 ), FBModelTransformationType.kModelRotation, True )
-                    ByLabelNameofbone = FBFindModelByLabelName(str(i.replace("_R","_L")))
-                    ByLabelNameofbone.SetVector( FBVector3d( -90, 0, 90 ), FBModelTransformationType.kModelRotation, True )
-                else:
-                    ByLabelNameofbone = FBFindModelByLabelName(str(i))
-                    ByLabelNameofbone.SetVector( FBVector3d( 90, 0, -180 ), FBModelTransformationType.kModelRotation, True )
-                    ByLabelNameofbone = FBFindModelByLabelName(str(i.replace("_R","_L")))
-                    ByLabelNameofbone.SetVector( FBVector3d( -90, 0, -180 ), FBModelTransformationType.kModelRotation, True )
-    def CharacterizeHiRes(self,charName,Type):
-        characters = FBSystem().Scene.Characters
-        if characters:
-            for character in characters:
-                if character.LongName == charName:
-                    #print "aready chexk %s"%(charName)
-                    character.FBDelete()
-        myCharacter = FBCharacter(charName)
-        # NameMap
-        # print Type
-        if Type == "adv":
-            self.addJointToCharacter (myCharacter, 'Reference', 'root')
-            self.addJointToCharacter (myCharacter, 'Hips', 'Root_M')
-            self.addJointToCharacter (myCharacter, 'LeftUpLeg', 'Hip_L')
-            self.addJointToCharacter (myCharacter, 'LeftLeg', 'Knee_L')
-            self.addJointToCharacter (myCharacter, 'LeftFoot', 'Ankle_L')
-            self.addJointToCharacter (myCharacter, 'LeftToeBase', 'Toes_L')
-            self.addJointToCharacter (myCharacter, 'LeftFootMiddle1', 'ToesEnd_L')
-            self.addJointToCharacter (myCharacter, 'RightUpLeg', 'Hip_R')
-            self.addJointToCharacter (myCharacter, 'RightLeg', 'Knee_R')
-            self.addJointToCharacter (myCharacter, 'RightFoot', 'Ankle_R')
-            self.addJointToCharacter (myCharacter, 'RightToeBase', 'Toes_R')
-            self.addJointToCharacter (myCharacter, 'RightFootMiddle1', 'ToesEnd_R')
-            self.addJointToCharacter (myCharacter, 'LeftShoulder', 'Scapula_L')
-            self.addJointToCharacter (myCharacter, 'LeftArm', 'Shoulder_L')
-            self.addJointToCharacter (myCharacter, 'LeftForeArm', 'Elbow_L')
-            self.addJointToCharacter (myCharacter, 'LeftHand', 'Wrist_L')
-            #self.addJointToCharacter (myCharacter, 'LeftInHandIndex', 'LeftHandIndex')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex1', 'IndexFinger1_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex2', 'IndexFinger2_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex3', 'IndexFinger3_L')
-            #self.addJointToCharacter (myCharacter, 'LeftHandIndex4', 'LeftHandIndex4')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb1', 'ThumbFinger1_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb2', 'ThumbFinger2_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb3', 'ThumbFinger3_L')
-            #self.addJointToCharacter (myCharacter, 'LeftHandThumb4', 'LeftHandThumb4')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle1', 'MiddleFinger1_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle2', 'MiddleFinger2_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle3', 'MiddleFinger3_L')
-            #self.addJointToCharacter (myCharacter, 'LeftHandMiddle4', 'LeftHandMiddle4')
-            #self.addJointToCharacter (myCharacter, 'LeftInHandRing', 'LeftHandRing')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing1', 'RingFinger1_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing2', 'RingFinger2_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing3', 'RingFinger3_L')
-            #self.addJointToCharacter (myCharacter, 'LeftHandRing4', 'LeftHandRing4')
-            #self.addJointToCharacter (myCharacter, 'LeftInHandPinky', 'LeftHandPinky')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky1', 'PinkyFinger1_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky2', 'PinkyFinger2_L')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky3', 'PinkyFinger3_L')
-            #self.addJointToCharacter (myCharacter, 'LeftHandPinky4', 'LeftHandPinky4')
-            self.addJointToCharacter (myCharacter, 'RightShoulder', 'Scapula_R')
-            self.addJointToCharacter (myCharacter, 'RightArm', 'Shoulder_R')
-            self.addJointToCharacter (myCharacter, 'RightForeArm', 'Elbow_R')
-            self.addJointToCharacter (myCharacter, 'RightHand', 'Wrist_R')
-            #self.addJointToCharacter (myCharacter, 'RightInHandIndex', 'RightHandIndex')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex1', 'IndexFinger1_R')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex2', 'IndexFinger2_R')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex3', 'IndexFinger3_R')
-            #self.addJointToCharacter (myCharacter, 'RightHandIndex4', 'RightHandIndex4')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb1', 'ThumbFinger1_R')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb2', 'ThumbFinger2_R')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb3', 'ThumbFinger3_R')
-            #self.addJointToCharacter (myCharacter, 'RightHandThumb4', 'RightHandThumb4')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle1', 'MiddleFinger1_R')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle2', 'MiddleFinger2_R')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle3', 'MiddleFinger3_R')
-            #self.addJointToCharacter (myCharacter, 'RightHandMiddle4', 'RightHandMiddle4')
-            #self.addJointToCharacter (myCharacter, 'RightInHandRing', 'RightHandRing')
-            self.addJointToCharacter (myCharacter, 'RightHandRing1', 'RingFinger1_R')
-            self.addJointToCharacter (myCharacter, 'RightHandRing2', 'RingFinger2_R')
-            self.addJointToCharacter (myCharacter, 'RightHandRing3', 'RingFinger3_R')
-            #self.addJointToCharacter (myCharacter, 'RightHandRing4', 'RightHandRing4')
-            #self.addJointToCharacter (myCharacter, 'RightInHandPinky', 'RightHandPinky')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky1', 'PinkyFinger1_R')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky2', 'PinkyFinger2_R')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky3', 'PinkyFinger3_R')
-            #self.addJointToCharacter (myCharacter, 'RightHandPinky4', 'RightHandPinky4')
-            self.addJointToCharacter (myCharacter, 'Spine', 'Spine1_M')
-            self.addJointToCharacter (myCharacter, 'Spine1', 'Spine2_M')
-            self.addJointToCharacter (myCharacter, 'Spine2', 'Chest_M')
-            self.addJointToCharacter (myCharacter, 'Spine3', 'Spine3')
-            self.addJointToCharacter (myCharacter, 'Neck', 'Neck_M')
-            self.addJointToCharacter (myCharacter, 'Neck1', 'Neck1')
-            self.addJointToCharacter (myCharacter, 'Head', 'Head_M')
-            #turn character on, for some reason this often causes mB2012 to crash.
-        elif Type == "Hips":
+            self.min_frame = 0
+            self.max_frame = 0
+    def setcurrentUnit(self,timeed):
+        if timeed == 24:
+            cmds.currentUnit(time='film')
+        elif timeed == 25:
+            cmds.currentUnit(time='pal')
+        elif timeed == 30:
+            cmds.currentUnit(time='ntsc')
+        elif timeed == 48:
+            cmds.currentUnit(time='show')
+        elif timeed == 60:
+            cmds.currentUnit(time='ntscf')
+    def getAllctrl(self):
+        nurbsCurves = cmds.ls(type='nurbsCurve',long = 1)
+        curveTransforms = []
+        for curve in nurbsCurves:
+            parent = cmds.listRelatives(curve, parent=True,fullPath=True)
+            if parent:
+                curveTransforms.append(parent[0])
+        return curveTransforms
+    def setAllctrlZero(self):
+        allCtrlnurbsCurves = self.getAllctrl()
+        if allCtrlnurbsCurves:
+            cmds.currentTime(100)
+            for ctrl in allCtrlnurbsCurves:
+                self.SetKey(ctrl+".tx")
+                self.SetKey(ctrl+".ty")
+                self.SetKey(ctrl+".tz")
 
-            self.addJointToCharacter (myCharacter, 'Reference', 'root')
-            #print 'Hips'
-            self.addJointToCharacter (myCharacter, 'Hips', ':Hips' )
+                self.SetKey(ctrl+".rx")
+                self.SetKey(ctrl+".ry")
+                self.SetKey(ctrl+".rz")
+            self.getAllMain()
+            if self.AllmainCtrl:
+                AllmainCtrlidck = {}
+                for i in self.AllmainCtrl:
+                    tx = cmds.getAttr(i+".tx")
+                    ty = cmds.getAttr(i+".ty")
+                    tz = cmds.getAttr(i+".tz")
+                    rx = cmds.getAttr(i+".rx")
+                    ry = cmds.getAttr(i+".ry")
+                    rz = cmds.getAttr(i+".rz")
+                    AllmainCtrlidck[i] = [tx,ty,tz,rx,ry,rz]
+                for ctrl in allCtrlnurbsCurves:
+                    cmds.currentTime(0)
+                    self.setV(ctrl+".tx",0)
+                    self.setV(ctrl+".ty",0)
+                    self.setV(ctrl+".tz",0)
+                    self.setV(ctrl+".rx",0)
+                    self.setV(ctrl+".ry",0)
+                    self.setV(ctrl+".rz",0)
+                    self.SetKey(ctrl+".tx")
+                    self.SetKey(ctrl+".ty")
+                    self.SetKey(ctrl+".tz")
+                    self.SetKey(ctrl+".rx")
+                    self.SetKey(ctrl+".ry")
+                    self.SetKey(ctrl+".rz")
+                    cmds.currentTime(1)
+                    self.setV(ctrl+".tx",0)
+                    self.setV(ctrl+".ty",0)
+                    self.setV(ctrl+".tz",0)
+                    self.setV(ctrl+".rx",0)
+                    self.setV(ctrl+".ry",0)
+                    self.setV(ctrl+".rz",0)
+                    self.SetKey(ctrl+".tx")
+                    self.SetKey(ctrl+".ty")
+                    self.SetKey(ctrl+".tz")
+                    self.SetKey(ctrl+".rx")
+                    self.SetKey(ctrl+".ry")
+                    self.SetKey(ctrl+".rz")
+                    cmds.currentTime(2)
+                    self.setV(ctrl+".tx",0)
+                    self.setV(ctrl+".ty",0)
+                    self.setV(ctrl+".tz",0)
+                    self.setV(ctrl+".rx",0)
+                    self.setV(ctrl+".ry",0)
+                    self.setV(ctrl+".rz",0)
+                    self.SetKey(ctrl+".tx")
+                    self.SetKey(ctrl+".ty")
+                    self.SetKey(ctrl+".tz")
+                    self.SetKey(ctrl+".rx")
+                    self.SetKey(ctrl+".ry")
+                    self.SetKey(ctrl+".rz")
+                for i in self.AllmainCtrl:
+                    cmds.currentTime(1)
+                    print(i.split("|")[-1])
+                    self.setV(i+".tx",AllmainCtrlidck[i][0])
+                    self.setV(i+".ty",AllmainCtrlidck[i][1])
+                    self.setV(i+".tz",AllmainCtrlidck[i][2])
 
-            self.addJointToCharacter (myCharacter, 'LeftUpLeg', 'LeftUpLeg')
-            self.addJointToCharacter (myCharacter, 'LeftLeg', 'LeftLeg')
-            self.addJointToCharacter (myCharacter, 'LeftFoot', 'LeftFoot')
-            self.addJointToCharacter (myCharacter, 'LeftToeBase', 'LeftToeBase')
-            self.addJointToCharacter (myCharacter, 'LeftFootMiddle1', 'LeftToeBaseEnd')
+                    self.setV(i+".rx",AllmainCtrlidck[i][3])
+                    self.setV(i+".ry",AllmainCtrlidck[i][4])
+                    self.setV(i+".rz",AllmainCtrlidck[i][5])
 
-            self.addJointToCharacter (myCharacter, 'RightUpLeg', 'RightUpLeg')
-            self.addJointToCharacter (myCharacter, 'RightLeg', 'RightLeg')
-            self.addJointToCharacter (myCharacter, 'RightFoot', 'RightFoot')
-            self.addJointToCharacter (myCharacter, 'RightToeBase', 'RightToeBase')
-            self.addJointToCharacter (myCharacter, 'RightFootMiddle1', 'RightToeBaseEnd')
+                    self.SetKey(i+".tx")
+                    self.SetKey(i+".ty")
+                    self.SetKey(i+".tz")
 
-            self.addJointToCharacter (myCharacter, 'LeftShoulder', 'LeftShoulder')
-            self.addJointToCharacter (myCharacter, 'LeftArm', 'LeftArm')
-            self.addJointToCharacter (myCharacter, 'LeftForeArm', 'LeftForeArm')
-            self.addJointToCharacter (myCharacter, 'LeftHand', 'LeftHand')
-            self.addJointToCharacter (myCharacter, 'LeftInHandIndex', 'LeftHandIndex')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex1', 'LeftHandIndex1')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex2', 'LeftHandIndex2')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex3', 'LeftHandIndex3')
-            self.addJointToCharacter (myCharacter, 'LeftHandIndex4', 'LeftHandIndex4')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb1', 'LeftHandThumb1')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb2', 'LeftHandThumb2')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb3', 'LeftHandThumb3')
-            self.addJointToCharacter (myCharacter, 'LeftHandThumb4', 'LeftHandThumb4')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle1', 'LeftHandMiddle1')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle2', 'LeftHandMiddle2')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle3', 'LeftHandMiddle3')
-            self.addJointToCharacter (myCharacter, 'LeftHandMiddle4', 'LeftHandMiddle4')
-            self.addJointToCharacter (myCharacter, 'LeftInHandRing', 'LeftHandRing')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing1', 'LeftHandRing1')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing2', 'LeftHandRing2')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing3', 'LeftHandRing3')
-            self.addJointToCharacter (myCharacter, 'LeftHandRing4', 'LeftHandRing4')
-            self.addJointToCharacter (myCharacter, 'LeftInHandPinky', 'LeftHandPinky')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky1', 'LeftHandPinky1')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky2', 'LeftHandPinky2')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky3', 'LeftHandPinky3')
-            self.addJointToCharacter (myCharacter, 'LeftHandPinky4', 'LeftHandPinky4')
+                    self.SetKey(i+".rx")
+                    self.SetKey(i+".ry")
+                    self.SetKey(i+".rz")
 
-            self.addJointToCharacter (myCharacter, 'RightShoulder', 'RightShoulder')
-            self.addJointToCharacter (myCharacter, 'RightArm', 'RightArm')
-            self.addJointToCharacter (myCharacter, 'RightForeArm', 'RightForeArm')
-            self.addJointToCharacter (myCharacter, 'RightHand', 'RightHand')
-            #self.addJointToCharacter (myCharacter, 'RightInHandIndex', 'RightHandIndex')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex1', 'RightHandIndex1')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex2', 'RightHandIndex2')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex3', 'RightHandIndex3')
-            self.addJointToCharacter (myCharacter, 'RightHandIndex4', 'RightHandIndex4')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb1', 'RightHandThumb1')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb2', 'RightHandThumb2')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb3', 'RightHandThumb3')
-            self.addJointToCharacter (myCharacter, 'RightHandThumb4', 'RightHandThumb4')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle1', 'RightHandMiddle1')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle2', 'RightHandMiddle2')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle3', 'RightHandMiddle3')
-            self.addJointToCharacter (myCharacter, 'RightHandMiddle4', 'RightHandMiddle4')
-            #self.addJointToCharacter (myCharacter, 'RightInHandRing', 'RightHandRing')
-            self.addJointToCharacter (myCharacter, 'RightHandRing1', 'RightHandRing1')
-            self.addJointToCharacter (myCharacter, 'RightHandRing2', 'RightHandRing2')
-            self.addJointToCharacter (myCharacter, 'RightHandRing3', 'RightHandRing3')
-            self.addJointToCharacter (myCharacter, 'RightHandRing4', 'RightHandRing4')
-            #self.addJointToCharacter (myCharacter, 'RightInHandPinky', 'RightHandPinky')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky1', 'RightHandPinky1')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky2', 'RightHandPinky2')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky3', 'RightHandPinky3')
-            self.addJointToCharacter (myCharacter, 'RightHandPinky4', 'RightHandPinky4')
+                    cmds.currentTime(2)
 
-            self.addJointToCharacter (myCharacter, 'Spine', 'Spine')
-            self.addJointToCharacter (myCharacter, 'Spine1', 'Spine1')
-            self.addJointToCharacter (myCharacter, 'Spine2', 'Spine2')
-            self.addJointToCharacter (myCharacter, 'Spine3', 'Spine3')
-            self.addJointToCharacter (myCharacter, 'Neck', 'Neck')
-            self.addJointToCharacter (myCharacter, 'Neck1', 'Neck1')
-            self.addJointToCharacter (myCharacter, 'Head', 'Head')
-            # turn character on, for some reason this often causes mB2012 to crash.
-        myCharacter.SetCharacterizeOn(True)
-        #myCharacter.CreateControlRig(True)
-        #myCharacter.ActiveInput = True
-    def readjson(self,jsonpath):
-        with open(jsonpath) as json_file:
-            #print json_file
-            data = json.load(json_file)
-        return data
-    def addJointToCharacter(self,characterObject,slot,jointName ):
-        myJoint = FBFindObjectByFullName('Model::' + jointName)
-        property = characterObject.PropertyList.Find(slot + "Link")
-        property.removeAll()
-        property.append(myJoint)
-MB = MotionBuilder()
+                    self.setV(i+".tx",AllmainCtrlidck[i][0])
+                    self.setV(i+".ty",AllmainCtrlidck[i][1])
+                    self.setV(i+".tz",AllmainCtrlidck[i][2])
+
+                    self.setV(i+".rx",AllmainCtrlidck[i][3])
+                    self.setV(i+".ry",AllmainCtrlidck[i][4])
+                    self.setV(i+".rz",AllmainCtrlidck[i][5])
+
+                    self.SetKey(i+".tx")
+                    self.SetKey(i+".ty")
+                    self.SetKey(i+".tz")
+
+                    self.SetKey(i+".rx")
+                    self.SetKey(i+".ry")
+                    self.SetKey(i+".rz")
+            FKIKLeg_L = cmds.ls("*:FKIKLeg_L",long = 1)
+            if FKIKLeg_L:
+                for i in FKIKLeg_L:
+                    cmds.currentTime(1)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+                    cmds.currentTime(2)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+            FKIKLeg_R = cmds.ls("*:FKIKLeg_R",long = 1)
+            if FKIKLeg_R:
+                for i in FKIKLeg_R:
+                    cmds.currentTime(1)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+                    cmds.currentTime(2)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+            FKIKLeg_L = cmds.ls("*:FKIKArm_L",long = 1)
+            if FKIKLeg_L:
+                for i in FKIKLeg_L:
+                    cmds.currentTime(1)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+                    cmds.currentTime(2)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+            FKIKLeg_R = cmds.ls("*:FKIKArm_R",long = 1)
+            if FKIKLeg_R:
+                for i in FKIKLeg_R:
+                    cmds.currentTime(1)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+                    cmds.currentTime(2)
+                    self.setV(i+".FKIKBlend",0)
+                    self.SetKey(i+".FKIKBlend")
+        self.setKeyCurve()
+    def setKeyCurve(self):
+        animCurveTA = cmds.ls(type = "animCurveTA")
+        cmds.select(animCurveTA)
+        cmds.filterCurve(animCurveTA)
+    def setV(self,ctrl,v):
+        try:
+            cmds.setAttr(ctrl,v)
+        except:
+            pass
+    def SetKey(self,ctrl):
+        try:
+            cmds.setKeyframe(ctrl)
+        except:
+            pass
+    def getAllMain(self):
+        self.AllmainCtrl = []
+        allmain = cmds.ls("*:Main",long = True)
+        if allmain:
+            for i in allmain:
+                self.AllmainCtrl.append(i)
+        allRootX_M = cmds.ls("*:RootX_M",long = True)
+        if allRootX_M:
+            for i in allRootX_M:
+                self.AllmainCtrl.append(i)
+    def listCurvesInGroup(self,groupName):
+        allDescendents = cmds.listRelatives(groupName, allDescendents=True, fullPath=True) or []
+        allCurves = cmds.ls(allDescendents, type='nurbsCurve', long=True)
+        curveTransforms = list(set([cmds.listRelatives(curve, parent=True, fullPath=True)[0] for curve in allCurves]))
+        return curveTransforms
+ExportFBX_C()
