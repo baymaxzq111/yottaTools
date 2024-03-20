@@ -9,6 +9,7 @@ import json
 import threading
 import shutil
 import ctypes
+from ctypes import wintypes
 print("这是一个jiaoben")
 print(sys.argv)
 
