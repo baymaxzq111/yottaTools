@@ -1,11 +1,14 @@
-# -*- coding: ascii -*-
+# coding=utf-8
 # Python bytecode 2.7
 
 import sys
 import maya.cmds as cmds
 import maya.mel as mel
 import os
+import ctypes.wintypes
 import maya.standalone as std
+import shutil
+
 std.initialize(name='python')
 # pyrcc5 -o qrc_resources.py resources.qrc
 mayapath = sys.argv[1]
@@ -103,6 +106,7 @@ class ExportFBX_C():
         self.listCam()
         self.listAllbone()
         self.bakeAni(self.selecttion)
+        #self.clearAllconstanc()
         self.listAllRigBone()
         self.Fbx = {}
         if self.skonbone:
@@ -116,11 +120,13 @@ class ExportFBX_C():
                             Charmesh.append(k)
                 if Charmesh:
                     charname = i.split(":")[0]
+                    print(self.mayaOutpath,charname)
                     charOutput = self.mayaOutpath+charname+".fbx"
                     self.Fbx[charname] = [charOutput,skelect,Charmesh]
                     referenceNode = self.getReferenceNodeFromSelection(i)
                     if referenceNode:
                         self.importReferenceByNode(referenceNode)
+                    self.disconnect_all_connections(i)
                     cmds.select(skelect)
                     cmds.select(Charmesh,add = 1)
                     self.ouputFBx(charOutput)
