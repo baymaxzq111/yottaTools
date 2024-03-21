@@ -4,19 +4,25 @@
 import sys
 import maya.cmds as cmds
 import maya.mel as mel
+import MayaGetInfo
 import os
 import ctypes.wintypes
 import maya.standalone as std
 import shutil
+import json
+import ctypes
+from ctypes import wintypes
 
 std.initialize(name='python')
 # pyrcc5 -o qrc_resources.py resources.qrc
 mayapath = sys.argv[1]
-
+#print(mayapath)
 class ExportFBX_C():
     def __init__(self):
         mayaOutpath,mayafieldername = os.path.split(mayapath)
         self.selecttion = []
+        self.getDocumentspath()
+        self.loginfo = self.Documentspath+"LogInfo.json"
         if sys.argv[3]  == "Ani":
             self.mayaOutpath = mayaOutpath+"/"+mayafieldername.split(".")[0]+"/"
             if not os.path.exists(self.mayaOutpath):
@@ -33,6 +39,12 @@ class ExportFBX_C():
         self.disConnectlistAllbone()
         cmds.select(self.selecttion)
         self.ouputFBx(fbxpath)
+    def getDocumentspath(self):
+        CSIDL_PERSONAL = 5	   # My Documents
+        SHGFP_TYPE_CURRENT = 0   # Get current, not default value
+        buf= ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+        ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, SHGFP_TYPE_CURRENT, buf)
+        self.Documentspath = buf.value.replace("\\","/")+"/"
     def disConnectlistAllbone(self):
         allboen = cmds.ls(type = "joint",long=True)
         for i in allboen:
@@ -98,6 +110,9 @@ class ExportFBX_C():
                         typ = "mayaBinary",
                         o = True
                     )
+        ConoptPut = self.CanOutPut()
+        if not ConoptPut:
+            return
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
             cmds.loadPlugin('fbxmaya')
         self.setcurrentUnit(int(sys.argv[2]))
@@ -127,7 +142,10 @@ class ExportFBX_C():
                     if referenceNode:
                         self.importReferenceByNode(referenceNode)
                     self.disconnect_all_connections(i)
-                    cmds.select(skelect)
+                    cmds.select(cl = 1)
+                    for kka in skelect:
+                        if cmds.objExists(kka):
+                            cmds.select(kka,add = 1)
                     cmds.select(Charmesh,add = 1)
                     self.ouputFBx(charOutput)
                     charnameallobj = cmds.ls(charname+":*")
@@ -503,4 +521,24 @@ class ExportFBX_C():
         allCurves = cmds.ls(allDescendents, type='nurbsCurve', long=True)
         curveTransforms = list(set([cmds.listRelatives(curve, parent=True, fullPath=True)[0] for curve in allCurves]))
         return curveTransforms
+    def CanOutPut(self):
+        MayaGetInfo.Getinfo_C().onoffreference()
+        self.logdick = self.readjson(self.loginfo)
+        if mayapath in self.logdick.keys():
+            if self.logdick[mayapath] == []:
+                return True
+            else:
+                if u"引用文件丢失" in self.logdick[mayapath]:
+                    return False
+        else:
+            return False
+    def readjson(self,jsonpath):
+        with open(jsonpath) as json_file:
+            data = json.load(json_file)
+        return data
+    def writjson(self,pathsaveName,dictA):
+        newpath = pathsaveName
+        final_json = json.dumps(dictA, sort_keys=True, indent=4)
+        with open(newpath, 'w') as f:
+            f.write(final_json)
 ExportFBX_C()
