@@ -110,9 +110,14 @@ class ExportFBX_C():
                         typ = "mayaBinary",
                         o = True
                     )
+        try:
+            cmds.delete("_UNKNOWN_REF_NODE_")
+        except:
+            pass
         ConoptPut = self.CanOutPut()
-        if not ConoptPut:
-            return
+        if ConoptPut != None:
+            if not ConoptPut:
+                return
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
             cmds.loadPlugin('fbxmaya')
         self.setcurrentUnit(int(sys.argv[2]))
@@ -120,9 +125,12 @@ class ExportFBX_C():
         #cmds.file(force=True, save=True, options="v=0", type="mayaAscii")
         self.listCam()
         self.listAllbone()
-        self.bakeAni(self.selecttion)
         #self.clearAllconstanc()
         self.listAllRigBone()
+        Joints = cmds.ls(type = "joint",allPaths= True)
+        blendshapes = cmds.ls(type = "blendshape")
+        self.bakeAni(self.getallselect(Joints))
+        self.bakeAni(blendshapes)
         self.Fbx = {}
         if self.skonbone:
             for i in self.skonbone:
@@ -135,7 +143,7 @@ class ExportFBX_C():
                             Charmesh.append(k)
                 if Charmesh:
                     charname = i.split(":")[0]
-                    print(self.mayaOutpath,charname)
+                    #print(self.mayaOutpath,charname)
                     charOutput = self.mayaOutpath+charname+".fbx"
                     self.Fbx[charname] = [charOutput,skelect,Charmesh]
                     referenceNode = self.getReferenceNodeFromSelection(i)
@@ -159,6 +167,8 @@ class ExportFBX_C():
                 charOutput = self.mayaOutpath+cam.replace(":","_")+"_outPutCam.fbx"
                 cmds.select(cam)
                 self.ouputFBx(charOutput)
+            #道具引用
+            self.proExport()
             #others
             othersJoint = cmds.ls(type = "joint")
             if othersJoint:
@@ -183,10 +193,6 @@ class ExportFBX_C():
                             cmds.delete(i)
                         except:
                             pass
-            #cmds.file(force=True, save=True, options="v=0", type="mayaAscii")
-            #outputTxt = self.mayaOutpath+"output.txt"
-            #sys.stdout = open(outputTxt, "w")
-            #print (sys.stdout)
             for key,vou in self.Fbx.items():
                 self.OpneFBx(vou[0])
                 cmds.select(cl = 1)
@@ -211,6 +217,84 @@ class ExportFBX_C():
                     self.bakeAni("Box")
                     cmds.select("Box")
                 self.ouputFBxAll(vou[0])
+    def list_and_import_all_references(self):
+        reference_nodes = cmds.ls(type='reference')
+        for ref_node in reference_nodes:
+            try:
+                ref_file = cmds.referenceQuery(ref_node, filename=True)
+                cmds.file(ref_file, importReference=True)
+            except RuntimeError as e:
+                pass
+    def proExport(self):
+        self.list_and_import_all_references()
+        skeletons_grouped_by_roots = self.list_skeletons_grouped_by_roots()
+        fbxa = []
+        for root, skeletons in skeletons_grouped_by_roots.items():
+            exportFB = []
+            for i in skeletons:
+                objk = self.findSkinnedMeshesFromJoint(i)
+                exportFB.append(i)
+                for k in objk:
+                    if k not in  exportFB:
+                        exportFB.append(k)
+            cmds.select(exportFB)
+            print(root)
+            charOutput = self.mayaOutpath + root.split(":")[0]+".fbx"
+            self.ouputFBx(charOutput)
+            fbxa.append(charOutput)
+        for k in fbxa:
+            if os.path.exists(k):
+                self.OpneFBx(k)
+                self.removeAllNamespaces()
+                container = cmds.ls(type = "container")
+                if container:
+                    cmds.delete(container)
+                if cmds.objExists("Root_M") or cmds.objExists("hips") :
+                    cmds.polyCube(n = "Box")
+                    if cmds.objExists("Root_M"):
+                        cmds.parentConstraint( 'Root_M', 'Box', mo = 0 )
+                    elif cmds.objExists("hips"):
+                        cmds.parentConstraint( 'hips', 'Box', mo = 0 )
+                    self.bakeAni("Box")
+                    cmds.select("Box")
+                self.ouputFBxAll(k)
+    def find_top_level_parent(self,node):
+        parents = cmds.listRelatives(node, parent=True, fullPath=True)
+        if parents:
+            return self.find_top_level_parent(parents[0])
+        else:
+            return node
+    def list_skeletons_grouped_by_roots(self):
+        skeletons = cmds.ls(type='joint', long=True)
+        skeleton_root_map = {}
+        for skeleton in skeletons:
+            root = self.find_top_level_parent(skeleton)
+            if root in skeleton_root_map:
+                skeleton_root_map[root].append(skeleton)
+            else:
+                skeleton_root_map[root] = [skeleton]
+        skeleton_root_map_short = {cmds.ls(key, shortNames=True)[0]: [cmds.ls(skel, shortNames=True)[0] for skel in value]
+                                   for key, value in skeleton_root_map.items()}
+        return skeleton_root_map_short
+        #skeletons_grouped_by_roots = list_skeletons_grouped_by_roots()
+        #for root, skeletons in skeletons_grouped_by_roots.items():
+        #   print(root,skeletons)
+    def getallselect(self,listall):
+        allback = []
+        for i in listall:
+            parents = self.get_all_parents(i)
+            for l in  parents:
+                if l not in allback:
+                    allback.append(i)
+        return allback
+    def get_all_parents(self,node):
+        parents = []
+        current_parents = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        while current_parents:
+            current_parent = current_parents[0]
+            parents.append(current_parent)
+            current_parents = cmds.listRelatives(current_parent, parent=True, fullPath=True) or []
+        return parents
     def OpneFBx(self,fbxpath):
         #cmds.file(new=True, force=True)
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
@@ -233,10 +317,16 @@ class ExportFBX_C():
     def ouputFBxAll(self,ath):
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
             cmds.loadPlugin('fbxmaya')
+        cmds.FBXExportSmoothMesh('-v', True)
+        cmds.FBXExportSmoothingGroups('-v', True)
+        cmds.FBXExportAnimation('-v', True)
         cmds.file(ath,force = True,options = "v=0;",type = "FBX export",pr = True,ea = True)
     def ouputFBx(self,pathFBx):
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
             cmds.loadPlugin('fbxmaya')
+        cmds.FBXExportSmoothMesh('-v', True)
+        cmds.FBXExportSmoothingGroups('-v', True)
+        cmds.FBXExportAnimation('-v', True)
         cmds.file(pathFBx, force=True, options="v=0;", typ="FBX export", pr=True, es=True)
     def importReferenceByNode(self,referenceNode):
         if cmds.nodeType(referenceNode) == "reference":
@@ -303,24 +393,25 @@ class ExportFBX_C():
                     self.Camerm.append(camparent[0])
                     self.selecttion.append(camparent[0])
     def bakeAni(self,selecttion):
-        cmds.select(selecttion)
-        #self.getMaxAndMinframe(selecttion[0])
-        minTime = cmds.playbackOptions(query=True, minTime=True)
-        maxTime = cmds.playbackOptions(query=True, maxTime=True)
-        cmds.bakeResults(selecttion,
-                        simulation = True,
-                        t = (minTime,maxTime),
-                        sampleBy = 1,
-                        oversamplingRate = 1,
-                        disableImplicitControl = True,
-                        preserveOutsideKeys = True,
-                        sparseAnimCurveBake = False ,
-                        removeBakedAttributeFromLayer = False ,
-                        removeBakedAnimFromLayer = False ,
-                        bakeOnOverrideLayer = False ,
-                        minimizeRotation = True ,
-                        controlPoints = False ,
-                        shape = True,)
+        if selecttion:
+            cmds.select(selecttion)
+            #self.getMaxAndMinframe(selecttion[0])
+            minTime = cmds.playbackOptions(query=True, minTime=True)
+            maxTime = cmds.playbackOptions(query=True, maxTime=True)
+            cmds.bakeResults(selecttion,
+                            simulation = True,
+                            t = (minTime,maxTime),
+                            sampleBy = 1,
+                            oversamplingRate = 1,
+                            disableImplicitControl = True,
+                            preserveOutsideKeys = True,
+                            sparseAnimCurveBake = False ,
+                            removeBakedAttributeFromLayer = False ,
+                            removeBakedAnimFromLayer = False ,
+                            bakeOnOverrideLayer = False ,
+                            minimizeRotation = True ,
+                            controlPoints = False ,
+                            shape = True,)
     def getMaxAndMinframe(self,selection_list):
         min_frame = None
         max_frame = None
