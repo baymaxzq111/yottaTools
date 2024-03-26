@@ -23,14 +23,17 @@ class Getinfo_C():
         for refNode in references:
             if refNode != 'sharedReferenceNode':
                 if refNode != "_UNKNOWN_REF_NODE_":
-                    isUnloaded = cmds.referenceQuery(refNode, isLoaded=True)
-                    refFilePath = cmds.referenceQuery(refNode, filename=True)
-                    if not isUnloaded:
+                    try:
+                        refFilePath = cmds.referenceQuery(refNode, filename=True)
                         refFilePathpath = refFilePath.split("{")[0]
                         if not os.path.exists(refFilePathpath):
                             self.current_file_path_info[refNode] = [u"路径丢失文件",refFilePath]
                         else:
-                            self.current_file_path_info[refNode] = [u"警告关闭的引用",refFilePath]
+                            isUnloaded = cmds.referenceQuery(refNode, isLoaded=True)
+                            if not isUnloaded:
+                                self.current_file_path_info[refNode] = [u"警告关闭的引用",refFilePath]
+                    except:
+                        print("没用的")
                 else:
                     self.current_file_path_info[refNode] = [u"垃圾引用节点",refFilePath]
         if self.current_file_path_info == {}:
