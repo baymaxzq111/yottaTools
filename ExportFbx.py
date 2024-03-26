@@ -319,14 +319,14 @@ class ExportFBX_C():
             cmds.loadPlugin('fbxmaya')
         cmds.FBXExportSmoothMesh('-v', True)
         cmds.FBXExportSmoothingGroups('-v', True)
-        cmds.FBXExportAnimation('-v', True)
+        #cmds.FBXExportAnimation('-v', True)
         cmds.file(ath,force = True,options = "v=0;",type = "FBX export",pr = True,ea = True)
     def ouputFBx(self,pathFBx):
         if not cmds.pluginInfo('fbxmaya', query=True, loaded=True):
             cmds.loadPlugin('fbxmaya')
         cmds.FBXExportSmoothMesh('-v', True)
         cmds.FBXExportSmoothingGroups('-v', True)
-        cmds.FBXExportAnimation('-v', True)
+        #cmds.FBXExportAnimation('-v', True)
         cmds.file(pathFBx, force=True, options="v=0;", typ="FBX export", pr=True, es=True)
     def importReferenceByNode(self,referenceNode):
         if cmds.nodeType(referenceNode) == "reference":
