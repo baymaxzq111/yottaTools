@@ -114,7 +114,7 @@ class MotionBuilder():
                 pass
     def SaveFBX(self,file_path):
         save_result = self.lApp.FileSave(str(file_path))
-        #self.lApp.FileExit(False)
+        self.lApp.FileExit(False)
     def OpenFBX(self,file_path):
         #print(file_path)
         self.lApp = FBApplication()
