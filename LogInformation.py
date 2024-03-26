@@ -27,7 +27,7 @@ class MainWindow(QWidget):
         self.label.setStyleSheet("background-color: black; font-size: 20px;")
         self.layout.addWidget(self.label)
         self.listWidget = QListWidget(self)
-        self.listWidget.setStyleSheet("background-color: white;")
+        self.listWidget.setStyleSheet("background-color: gray;")
         self.listWidget.viewport().installEventFilter(self)
         self.layout.addWidget(self.listWidget)
         self.setGeometry(0, 0, 1000, 256)
