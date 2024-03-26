@@ -10,7 +10,7 @@ import threading
 import shutil
 import ctypes
 from ctypes import wintypes
-print("这是一个jiaoben")
+print("输出FBX")
 print(sys.argv)
 
 class MotionBuilder():
@@ -53,6 +53,8 @@ class MotionBuilder():
         ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, SHGFP_TYPE_CURRENT, buf)
         self.Documentspath = buf.value.replace("\\","/")
         self.local_directory = self.Documentspath+"/directory/"
+        if self.local_directory not in sys.path:
+            sys.path.append(self.local_directory)
     def setBonesTposeS(self):
         Threadtext = self.readFbx["threading"]
         if Threadtext == u'单线程':
@@ -72,8 +74,7 @@ class MotionBuilder():
         if Threadtext == u'单线程':
             self.setBonesTposeOne()
         elif Threadtext == u'全部线程':
-            for i in range(number): #motionbuilderoutFBX
-                #print(self.readFbx["motionbuilderoutFBX"][i])
+            for i in range(number):
                 t = threading.Thread(target = self.onetsetBones,args=(self.readFbx["motionbuilderoutFBX"][i],))
                 t.start()
         else:
@@ -91,6 +92,7 @@ class MotionBuilder():
         return [lst[i:i+num] for i in range(0, len(lst), num)]
     def setBonesTposeOne(self):
         for i,v in self.readFbx.items():
+            print(i,v)
             for k in v:
                 self.onetsetBones(k)
     def clear_scene(self):
@@ -112,7 +114,7 @@ class MotionBuilder():
                 pass
     def SaveFBX(self,file_path):
         save_result = self.lApp.FileSave(str(file_path))
-        self.lApp.FileExit(False)
+        #self.lApp.FileExit(False)
     def OpenFBX(self,file_path):
         #print(file_path)
         self.lApp = FBApplication()
